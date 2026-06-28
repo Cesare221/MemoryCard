@@ -1,8 +1,12 @@
-# memory depo
+# Memory depo
 
 Um app pessoal para guardar ideias, notas, links e trechos em um só lugar.
 
 Autor: Cesar Delmondes
+
+## Live demo:
+
+https://second-brain-silk-gamma-13.vercel.app/
 
 ## Destaques
 
