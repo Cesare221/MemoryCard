@@ -1,40 +1,65 @@
 # MemoryDepo
 
-Aplicacao web para capturar notas, ideias, links e referencias em um espaco pessoal com busca rapida, organizacao simples e uso direto no navegador.
+Aplicação web para capturar notas, ideias, links e referências em um espaço pessoal com busca rápida, organização simples e sincronização com Supabase.
 
-[![Demo](https://img.shields.io/badge/Demo-online-2563EB?style=for-the-badge&logo=vercel&logoColor=white)](https://memorycard-gold.vercel.app/)
 [![React](https://img.shields.io/badge/Frontend-React-111827?style=for-the-badge&logo=react&logoColor=61DAFB)](#stack)
 [![Vite](https://img.shields.io/badge/Build-Vite-111827?style=for-the-badge&logo=vite&logoColor=646CFF)](#stack)
-[![LocalStorage](https://img.shields.io/badge/Dados-localStorage-111827?style=for-the-badge&logo=googlechrome&logoColor=white)](#visao-geral)
-
-## Visao Geral
-
-O MemoryDepo foi criado para resolver uma dor recorrente: informacoes uteis ficam espalhadas entre abas, conversas, anotações e arquivos, dificultando consulta e reaproveitamento.
-
-A proposta do projeto e funcionar como um segundo cerebro pessoal leve, visual e acessivel direto pelo navegador, sem depender de login ou infraestrutura externa.
-
-## O que o sistema faz
-
-- cria memorias com texto, links e referencias;
-- faz busca instantanea;
-- organiza conteudo por tipo;
-- permite fixar, editar, copiar e remover itens;
-- exporta e importa dados em JSON;
-- persiste tudo localmente no navegador.
+[![Supabase](https://img.shields.io/badge/Database-Supabase-111827?style=for-the-badge&logo=supabase&logoColor=3ECF8E)](#stack)
 
 ## Stack
 
 - React 19
 - Vite
+- Supabase (auth + banco Postgres com RLS)
+- GSAP (animação do cordão da lâmpada)
 - CSS puro
-- localStorage
 - Vercel
 
-## Como rodar localmente
+## Setup
+
+1. Crie um projeto no [Supabase](https://supabase.com)
+
+2. Copie `.env.example` para `.env` e preencha:
+
+```env
+VITE_SUPABASE_URL=https://seu-projeto.supabase.co
+VITE_SUPABASE_ANON_KEY=sua-anon-key-aqui
+```
+
+3. Execute o SQL de `supabase-migration.sql` no SQL Editor do Supabase para criar a tabela e as políticas RLS.
+
+4. Instale e rode:
 
 ```bash
 npm install
 npm run dev
+```
+
+## Funcionalidades
+
+- **Login com Lâmpada**: puxe o cordão para acender e acessar o formulário
+- **Cadastro público** com confirmação de e-mail
+- **Recuperação de senha** via link enviado por e-mail
+- **Migração automática**: ao entrar pela primeira vez, detecta e oferece importar memórias salvas anteriormente no navegador
+- **CRUD completo** de memórias (notas, ideias, links, trechos)
+- **Busca instantânea** com atalho ⌘K
+- **Fixar**, filtrar por tipo e exportar/importar JSON
+- **Sincronização em tempo real** com Supabase
+
+## Estrutura
+
+```
+src/
+  lib/
+    supabaseClient.js       # cliente Supabase
+  services/
+    authService.js          # cadastro, login, logout, recuperação
+    memoryService.js        # CRUD de memórias via Supabase
+  components/
+    LoginScreen.jsx         # tela de login com lâmpada animada
+  App.jsx                   # componente principal
+  styles.css                # estilos globais
+  main.jsx                  # entry point
 ```
 
 ## Build
@@ -42,38 +67,3 @@ npm run dev
 ```bash
 npm run build
 ```
-
-## Estrutura principal
-
-```text
-MemoryDepo/
-  src/App.jsx
-  src/styles.css
-  index.html
-  public/
-```
-
-## Objetivo do projeto
-
-Este projeto faz parte do meu portfolio como exemplo de produto pessoal voltado para produtividade e organizacao de informacao. Ele foi pensado para demonstrar:
-
-- foco em utilidade recorrente;
-- interface leve para uso diario;
-- estruturacao de estado no frontend;
-- preocupacao com experiencia simples e direta.
-
-## Demo
-
-- Aplicacao online: https://memorycard-gold.vercel.app/
-
-## Repositorio
-
-- Codigo: https://github.com/Cesare221/MemoryCard
-
-## Contato
-
-- Portfolio: https://cesarddev.com.br/
-- GitHub: https://github.com/Cesare221
-- LinkedIn: https://linkedin.com/in/cdelmondes
-
-Se este projeto fizer sentido para o seu contexto, fico a disposicao para conversar sobre produto, UX e organizacao de informacao no frontend.

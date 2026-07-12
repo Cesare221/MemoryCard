@@ -1,8 +1,16 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import './styles.css'
-
-const STORAGE_KEY = 'memory-depo-v2'
-const LOCALE = 'pt-BR'
+import LoginScreen from './components/LoginScreen.jsx'
+import Modal from './components/Modal.jsx'
+import { IconSearch, IconX, IconPin, IconTrash, IconCopy, IconCheck, IconEdit, IconLink, IconBrain, IconSun, IconMoon, TypeIcon } from './components/Icons.jsx'
+import {
+  signUp, signIn, signOut, tryRestoreSession, isMigrationDone, markMigrationDone,
+  detectLegacyItems, clearLegacyStorage, updatePassword,
+} from './services/authService.js'
+import { supabase } from './lib/supabaseClient.js'
+import { createItem as createRemoteItem, deleteItem as deleteRemoteItem, normalizeItems } from './services/memoryService.js'
+import { useTheme } from './hooks/useTheme.js'
+import { useMemories } from './hooks/useMemories.js'
 
 const TYPE_META = {
   note: { label: 'Nota', color: '#6366f1', dim: 'rgba(99,102,241,0.12)', border: 'rgba(99,102,241,0.35)', placeholder: 'Escreva uma nota ou pensamento…' },
@@ -24,53 +32,17 @@ function createId() {
   return cryptoObj?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-function isValidItem(item) {
-  return item
-    && typeof item === 'object'
-    && (typeof item.id === 'string' || typeof item.id === 'number')
-    && typeof item.type === 'string'
-    && typeof item.content === 'string'
-    && Array.isArray(item.tags)
-    && typeof item.pinned === 'boolean'
-    && typeof item.createdAt === 'number'
-}
-
-function normalizeItems(value) {
-  if (!Array.isArray(value)) return []
-
-  return value
-    .filter(isValidItem)
-    .map(item => ({
-      ...item,
-      id: String(item.id),
-      type: TYPE_META[item.type] ? item.type : 'note',
-      url: typeof item.url === 'string' ? item.url : '',
-      tags: item.tags.filter(tag => typeof tag === 'string'),
-      updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : item.createdAt,
-    }))
-}
-
-function loadItems() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
-  }
-}
-
 function formatRelative(ts) {
   const diff = Date.now() - ts
-  if (diff < 0) return 'agora'
   if (diff < 60000) return 'agora'
   if (diff < 3600000) return `${Math.floor(diff / 60000)}min atrás`
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h atrás`
   if (diff < 604800000) return `${Math.floor(diff / 86400000)}d atrás`
-  return new Intl.DateTimeFormat(LOCALE, { month: 'short', day: 'numeric' }).format(new Date(ts))
+  return new Intl.DateTimeFormat('pt-BR', { month: 'short', day: 'numeric' }).format(new Date(ts))
 }
 
 export default function App() {
-  const [items, setItems] = useState(() => normalizeItems(loadItems()))
+  const [session, setSession] = useState(() => tryRestoreSession())
   const [query, setQuery] = useState('')
   const [filterType, setFilterType] = useState('all')
   const [formType, setFormType] = useState('note')
@@ -80,39 +52,131 @@ export default function App() {
   const [editingId, setEditingId] = useState(null)
   const [copiedId, setCopiedId] = useState(null)
   const [status, setStatus] = useState(null)
+  const [authMode, setAuthMode] = useState('signin')
+  const [authError, setAuthError] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+  const [registeredEmail, setRegisteredEmail] = useState(null)
+  const [passwordResetMode, setPasswordResetMode] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [modalConfig, setModalConfig] = useState(null)
+
+  const { theme, toggleTheme } = useTheme()
+  const {
+    items, setItems, syncStatus, recentlyDeleted, pendingCount,
+    addItem, deleteItem, undoDelete, updateItem, loadItems, saveLocalCache,
+  } = useMemories(session)
+
   const searchRef = useRef(null)
   const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
   const statusTimerRef = useRef(null)
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
-    } catch {
-      setStatus({ tone: 'error', message: 'Não foi possível salvar localmente no navegador.' })
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') setPasswordResetMode(true)
+    })
+    return () => authListener?.subscription?.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function hydrate() {
+      if (!session) { setItems([]); setLoading(false); return }
+      setLoading(true)
+      await loadItems()
+      if (!cancelled) setLoading(false)
     }
-  }, [items])
+    hydrate()
+    return () => { cancelled = true }
+  }, [session])
+
+  useEffect(() => {
+    if (!session) return
+    if (isMigrationDone(session.id)) return
+    const legacyItems = detectLegacyItems()
+    if (legacyItems.length === 0) { markMigrationDone(session.id); return }
+    const normalized = normalizeItems(legacyItems)
+    if (normalized.length === 0) { markMigrationDone(session.id); clearLegacyStorage(); return }
+    importLegacyItems(normalized)
+    markMigrationDone(session.id)
+    clearLegacyStorage()
+  }, [session])
+
+  async function importLegacyItems(legacyItems) {
+    const existingIds = new Set(items.map((i) => i.id))
+    const newItems = legacyItems.filter((i) => !existingIds.has(i.id))
+    if (newItems.length === 0) return
+    setModalConfig({
+      title: 'Importar memórias antigas',
+      message: `Encontramos ${newItems.length} memória(s) salvas anteriormente no navegador. Deseja importá-las para sua conta?`,
+      confirmLabel: 'Importar',
+      cancelLabel: 'Ignorar',
+      onConfirm: async () => {
+        setModalConfig(null)
+        for (const item of newItems) {
+          try { await createRemoteItem(item, session.id) } catch {}
+        }
+        loadItems()
+      },
+      onCancel: () => setModalConfig(null),
+    })
+  }
 
   useEffect(() => {
     const handler = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault()
-        searchRef.current?.focus()
-      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); searchRef.current?.focus() }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  useEffect(() => () => {
-    if (statusTimerRef.current) window.clearTimeout(statusTimerRef.current)
-  }, [])
+  useEffect(() => () => { if (statusTimerRef.current) window.clearTimeout(statusTimerRef.current) }, [])
 
   const showStatus = useCallback((message, tone = 'info') => {
     setStatus({ message, tone })
     if (statusTimerRef.current) window.clearTimeout(statusTimerRef.current)
     statusTimerRef.current = window.setTimeout(() => setStatus(null), 2600)
   }, [])
+
+  const handleAuthSubmit = useCallback(async ({ email, password, name }) => {
+    setAuthLoading(true)
+    setAuthError('')
+    try {
+      if (authMode === 'signup') {
+        const result = await signUp({ email, password, name })
+        if (result.session) { setSession(result.session); showStatus('Conta criada com sucesso.', 'success') }
+        else setRegisteredEmail(email)
+      } else {
+        const result = await signIn({ email, password })
+        setSession(result.session)
+        showStatus('Login realizado com sucesso.', 'success')
+      }
+    } catch (error) {
+      setAuthError(error.message || 'Não foi possível concluir a autenticação.')
+    } finally { setAuthLoading(false) }
+  }, [authMode, showStatus])
+
+  const handlePasswordUpdate = useCallback(async ({ password }) => {
+    setAuthLoading(true)
+    setAuthError('')
+    try {
+      await updatePassword({ password })
+      setPasswordResetMode(false)
+      setAuthMode('signin')
+      showStatus('Senha atualizada com sucesso. Faça login com sua nova senha.', 'success')
+    } catch (error) {
+      setAuthError(error.message || 'Não foi possível atualizar a senha.')
+    } finally { setAuthLoading(false) }
+  }, [showStatus])
+
+  const handleLogout = useCallback(async () => {
+    await signOut()
+    setSession(null)
+    setQuery('')
+    setFilterType('all')
+    setRegisteredEmail(null)
+    showStatus('Sessão encerrada.', 'info')
+  }, [showStatus])
 
   const counts = useMemo(() => ({
     all: items.length,
@@ -148,50 +212,34 @@ export default function App() {
     setFormUrl('')
   }, [])
 
-  const addOrUpdateItem = useCallback(() => {
+  const addOrUpdateItem = useCallback(async () => {
     if (!formContent.trim()) return
-
     const tags = formTags.split(',').map(t => t.trim()).filter(Boolean)
-    const now = Date.now()
     const content = formContent.trim()
     const url = formType === 'link' ? formUrl.trim() : ''
+    const now = Date.now()
 
     if (editingId) {
-      setItems(prev => prev.map(item => (
-        item.id === editingId
-          ? { ...item, type: formType, content, url, tags, updatedAt: now }
-          : item
-      )))
+      await updateItem(editingId, { type: formType, content, url, tags, updatedAt: now })
+      resetForm()
+      textareaRef.current?.focus()
       showStatus('Memória atualizada.', 'success')
     } else {
-      setItems(prev => [{
-        id: createId(),
-        type: formType,
-        content,
-        url,
-        tags,
-        pinned: false,
-        createdAt: now,
-        updatedAt: now,
-      }, ...prev])
+      const newItem = { id: createId(), type: formType, content, url, tags, pinned: false, createdAt: now, updatedAt: now, user_id: session?.id }
+      await addItem(newItem.type, newItem.content, newItem.tags, newItem.url)
+      resetForm()
+      textareaRef.current?.focus()
       showStatus('Memória adicionada.', 'success')
     }
+  }, [editingId, formContent, formTags, formType, formUrl, session, resetForm, showStatus, addItem, updateItem])
 
-    resetForm()
-    textareaRef.current?.focus()
-  }, [editingId, formContent, formTags, formType, formUrl, resetForm, showStatus])
-
-  const togglePin = useCallback(id => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, pinned: !i.pinned, updatedAt: Date.now() } : i))
-    showStatus('Status atualizado.', 'success')
-  }, [showStatus])
-
-  const deleteItem = useCallback(id => {
-    if (!window.confirm('Excluir esta memória?')) return
-    setItems(prev => prev.filter(i => i.id !== id))
-    if (editingId === id) resetForm()
+  const handleDelete = useCallback((itemId) => {
+    const item = items.find(i => i.id === itemId)
+    if (!item) return
+    if (editingId === itemId) resetForm()
+    deleteItem(item)
     showStatus('Memória excluída.', 'info')
-  }, [editingId, resetForm, showStatus])
+  }, [items, editingId, resetForm, showStatus, deleteItem])
 
   const copyItem = useCallback(item => {
     const text = item.url ? `${item.content}\n${item.url}` : item.content
@@ -199,9 +247,7 @@ export default function App() {
       setCopiedId(item.id)
       showStatus('Copiado para a área de transferência.', 'success')
       window.setTimeout(() => setCopiedId(null), 1500)
-    }).catch(() => {
-      showStatus('Não foi possível copiar automaticamente.', 'error')
-    })
+    }).catch(() => showStatus('Não foi possível copiar automaticamente.', 'error'))
   }, [showStatus])
 
   const editItem = useCallback(item => {
@@ -214,25 +260,15 @@ export default function App() {
     textareaRef.current?.focus()
   }, [showStatus])
 
-  const cancelEdit = useCallback(() => {
-    resetForm()
-    showStatus('Edição cancelada.', 'info')
-  }, [resetForm, showStatus])
+  const cancelEdit = useCallback(() => { resetForm(); showStatus('Edição cancelada.', 'info') }, [resetForm, showStatus])
 
   const exportItems = useCallback(() => {
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      app: 'memory depo',
-      version: 2,
-      items,
-    }
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-    const objectUrl = URL.createObjectURL(blob)
+    const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), app: 'memory depo', version: 2, items }, null, 2)], { type: 'application/json' })
     const link = document.createElement('a')
-    link.href = objectUrl
+    link.href = URL.createObjectURL(blob)
     link.download = `memory-depo-${new Date().toISOString().slice(0, 10)}.json`
     link.click()
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 0)
     showStatus('Exportação concluída.', 'success')
   }, [items, showStatus])
 
@@ -240,217 +276,210 @@ export default function App() {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
-
     try {
       const text = await file.text()
       const parsed = JSON.parse(text)
       const incoming = normalizeItems(Array.isArray(parsed) ? parsed : parsed.items)
+      if (incoming.length === 0) { showStatus('O arquivo não contém memórias válidas.', 'error'); return }
+      setModalConfig({
+        title: 'Importar memórias',
+        message: `Importar ${incoming.length} memória(s)? Isso vai substituir os dados atuais.`,
+        confirmLabel: 'Substituir',
+        cancelLabel: 'Cancelar',
+        tone: 'danger',
+        onConfirm: async () => {
+          setModalConfig(null)
+          for (const item of items) { try { await deleteRemoteItem(item.id) } catch {} }
+          for (const item of incoming) { try { await createRemoteItem(item, session.id) } catch {} }
+          loadItems()
+          showStatus('Importação concluída.', 'success')
+        },
+        onCancel: () => setModalConfig(null),
+      })
+    } catch { showStatus('Arquivo inválido. Use um JSON exportado pelo app.', 'error') }
+  }, [items, session, showStatus, loadItems])
 
-      if (incoming.length === 0) {
-        showStatus('O arquivo não contém memórias válidas.', 'error')
-        return
-      }
-
-      const shouldReplace = window.confirm(`Importar ${incoming.length} memórias? Isso vai substituir os dados atuais.`)
-      if (!shouldReplace) return
-
-      setItems(incoming)
-      resetForm()
-      showStatus('Importação concluída.', 'success')
-    } catch {
-      showStatus('Arquivo inválido. Use um JSON exportado pelo app.', 'error')
-    }
-  }, [resetForm, showStatus])
+  const togglePin = useCallback(async (id) => {
+    const item = items.find(i => i.id === id)
+    if (!item) return
+    await updateItem(id, { pinned: !item.pinned, updatedAt: Date.now() })
+  }, [items, updateItem])
 
   const pinnedItems = filtered.filter(i => i.pinned)
   const unpinnedItems = filtered.filter(i => !i.pinned)
   const meta = TYPE_META[formType]
 
+  if (!session || passwordResetMode) {
+    return (
+      <>
+        <LoginScreen
+          mode={authMode}
+          onSubmit={handleAuthSubmit}
+          onPasswordUpdate={handlePasswordUpdate}
+          onSwitchMode={setAuthMode}
+          loading={authLoading}
+          error={authError}
+          registeredEmail={registeredEmail}
+          passwordResetMode={passwordResetMode}
+        />
+        <Modal open={!!modalConfig} title={modalConfig?.title} message={modalConfig?.message}
+          confirmLabel={modalConfig?.confirmLabel} cancelLabel={modalConfig?.cancelLabel}
+          tone={modalConfig?.tone} onConfirm={modalConfig?.onConfirm} onCancel={modalConfig?.onCancel} />
+      </>
+    )
+  }
+
   return (
-    <div className="app">
-      <header className="header">
-        <div className="header-inner">
-          <div className="header-left">
-            <div>
-              <h1 className="header-title">memory depo</h1>
-              <p className="header-sub">Notas, ideias, links e trechos em um espaço silencioso e pessoal</p>
+    <>
+      <div className="app">
+        <header className="header">
+          <div className="header-inner">
+            <div className="header-left">
+              <div>
+                <h1 className="header-title">memory depo</h1>
+                <p className="header-sub">Notas, ideias, links e trechos em um espaço silencioso e pessoal</p>
+              </div>
+            </div>
+            <div className="header-actions">
+              <span className={`sync-badge ${syncStatus}`}>
+                {syncStatus === 'saving' && 'Salvando…'}
+                {syncStatus === 'error' && 'Erro ao salvar'}
+                {syncStatus === 'idle' && items.length > 0 && 'Salvo'}
+              </span>
+              <button className="ghost-btn" onClick={toggleTheme} type="button" aria-label={theme === 'dark' ? 'Tema claro' : 'Tema escuro'}>
+                {theme === 'dark' ? <IconSun /> : <IconMoon />}
+              </button>
+              {pendingCount > 0 && <span className="sync-badge error">{pendingCount} pendente(s)</span>}
+              <span className="user-pill">{session?.name || session?.email}</span>
+              <button className="ghost-btn" onClick={handleLogout} type="button">Sair</button>
+            </div>
+            <div className="header-right">
+              <div className="search-wrap">
+                <span className="search-icon"><IconSearch /></span>
+                <input ref={searchRef} type="text" className="search-input" placeholder="Pesquisar… ⌘K"
+                  value={query} onChange={e => setQuery(e.target.value)} aria-label="Pesquisar" />
+                {query && (
+                  <button className="search-clear" onClick={() => setQuery('')} aria-label="Limpar pesquisa" type="button"><IconX /></button>
+                )}
+              </div>
             </div>
           </div>
-          <div className="header-right">
-            <div className="search-wrap">
-              <span className="search-icon"><IconSearch /></span>
-              <input
-                ref={searchRef}
-                type="text"
-                className="search-input"
-                placeholder="Pesquisar… ⌘K"
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                aria-label="Pesquisar"
-              />
-              {query && (
-                <button className="search-clear" onClick={() => setQuery('')} aria-label="Limpar pesquisa" type="button">
-                  <IconX />
+        </header>
+
+        <main className="main">
+          {status && <div className={`status-bar ${status.tone}`} role="status" aria-live="polite">{status.message}</div>}
+
+          {recentlyDeleted && (
+            <div className="status-bar info" role="alert">
+              Memória excluída.
+              <button className="ghost-btn" onClick={undoDelete} type="button" style={{ marginLeft: 8, textDecoration: 'underline' }}>Desfazer</button>
+            </div>
+          )}
+
+          <div className="quick-add" style={{ '--type-color': meta.color, '--type-dim': meta.dim, '--type-border': meta.border }}>
+            <div className="type-selector">
+              {Object.entries(TYPE_META).map(([value, m]) => (
+                <button key={value}
+                  className={`type-pill${formType === value ? ' active' : ''}`}
+                  style={formType === value ? { background: m.dim, borderColor: m.border, color: m.color } : {}}
+                  onClick={() => setFormType(value)} type="button">
+                  <TypeIcon type={value} />{m.label}
                 </button>
-              )}
+              ))}
+            </div>
+
+            <textarea ref={textareaRef} className="quick-textarea" placeholder={meta.placeholder}
+              value={formContent} onChange={e => setFormContent(e.target.value)}
+              onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') addOrUpdateItem() }}
+              rows={3} aria-label="Conteúdo" />
+
+            {formType === 'link' && (
+              <input type="url" className="form-input" placeholder="https://…"
+                value={formUrl} onChange={e => setFormUrl(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addOrUpdateItem()} aria-label="URL" />
+            )}
+
+            <div className="quick-footer">
+              <input type="text" className="form-input" placeholder="Tags: design, todo, referência"
+                value={formTags} onChange={e => setFormTags(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addOrUpdateItem()} aria-label="Tags" />
+              <button className="btn-primary" onClick={addOrUpdateItem} disabled={!formContent.trim()} type="button">
+                {editingId ? 'Salvar alterações' : 'Adicionar'}
+                <span className="btn-shortcut">⌘↵</span>
+              </button>
+            </div>
+
+            <div className="quick-utility-row">
+              {editingId && <button className="ghost-btn" onClick={cancelEdit} type="button">Cancelar edição</button>}
+              <button className="ghost-btn" onClick={exportItems} type="button">Exportar JSON</button>
+              <button className="ghost-btn" onClick={() => fileInputRef.current?.click()} type="button">Importar JSON</button>
+              <input ref={fileInputRef} className="visually-hidden" type="file" accept="application/json" onChange={importItems} />
             </div>
           </div>
-        </div>
-      </header>
 
-      <main className="main">
-        {status && (
-          <div className={`status-bar ${status.tone}`} role="status" aria-live="polite">
-            {status.message}
-          </div>
-        )}
-
-        <div className="quick-add" style={{ '--type-color': meta.color, '--type-dim': meta.dim, '--type-border': meta.border }}>
-          <div className="type-selector">
-            {Object.entries(TYPE_META).map(([value, m]) => (
-              <button
-                key={value}
-                className={`type-pill${formType === value ? ' active' : ''}`}
-                style={formType === value ? { background: m.dim, borderColor: m.border, color: m.color } : {}}
-                onClick={() => setFormType(value)}
-                type="button"
-              >
-                <TypeIcon type={value} />
-                {m.label}
+          <div className="filter-row">
+            {FILTERS.map(f => (
+              <button key={f.value} className={`filter-pill${filterType === f.value ? ' active' : ''}`}
+                onClick={() => setFilterType(f.value)} type="button">
+                {f.label}{counts[f.value] > 0 && <span className="filter-count">{counts[f.value]}</span>}
               </button>
             ))}
           </div>
 
-          <textarea
-            ref={textareaRef}
-            className="quick-textarea"
-            placeholder={meta.placeholder}
-            value={formContent}
-            onChange={e => setFormContent(e.target.value)}
-            onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') addOrUpdateItem() }}
-            rows={3}
-            aria-label="Conteúdo"
-          />
-
-          {formType === 'link' && (
-            <input
-              type="url"
-              className="form-input"
-              placeholder="https://…"
-              value={formUrl}
-              onChange={e => setFormUrl(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addOrUpdateItem()}
-              aria-label="URL"
-            />
-          )}
-
-          <div className="quick-footer">
-            <input
-              type="text"
-              className="form-input"
-              placeholder="Tags: design, todo, referência"
-              value={formTags}
-              onChange={e => setFormTags(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addOrUpdateItem()}
-              aria-label="Tags"
-            />
-            <button
-              className="btn-primary"
-              onClick={addOrUpdateItem}
-              disabled={!formContent.trim()}
-              aria-label={editingId ? 'Salvar alterações' : 'Adicionar'}
-              type="button"
-            >
-              {editingId ? 'Salvar alterações' : 'Adicionar'}
-              <span className="btn-shortcut">⌘↵</span>
-            </button>
-          </div>
-
-          <div className="quick-utility-row">
-            {editingId && (
-              <button className="ghost-btn" onClick={cancelEdit} type="button">
-                Cancelar edição
-              </button>
-            )}
-            <button className="ghost-btn" onClick={exportItems} type="button">
-              Exportar JSON
-            </button>
-            <button className="ghost-btn" onClick={() => fileInputRef.current?.click()} type="button">
-              Importar JSON
-            </button>
-            <input ref={fileInputRef} className="visually-hidden" type="file" accept="application/json" onChange={importItems} />
-          </div>
-        </div>
-
-        <div className="filter-row">
-          {FILTERS.map(f => {
-            const count = counts[f.value]
-            return (
-              <button
-                key={f.value}
-                className={`filter-pill${filterType === f.value ? ' active' : ''}`}
-                onClick={() => setFilterType(f.value)}
-                type="button"
-              >
-                {f.label}
-                {count > 0 && <span className="filter-count">{count}</span>}
-              </button>
-            )
-          })}
-        </div>
-
-        {filtered.length === 0 ? (
-          <div className="empty-state">
-            {query ? (
-              <>
-                <div className="empty-icon"><IconSearch /></div>
-                <p className="empty-title">Nenhum resultado para "{query}"</p>
-                <p className="empty-sub">Tente palavras-chave diferentes ou limpe a pesquisa</p>
-              </>
-            ) : (
-              <>
-                <div className="empty-icon"><IconBrain /></div>
-                <p className="empty-title">Seu memory depo está vazio</p>
-                <p className="empty-sub">Comece a capturar notas, ideias, links e trechos acima</p>
-                <button className="empty-cta" onClick={() => textareaRef.current?.focus()} type="button">
-                  Criar primeira memória
-                </button>
-              </>
-            )}
-          </div>
-        ) : (
-          <>
-            {pinnedItems.length > 0 && (
-              <section className="section">
-                <div className="section-label-row">
-                  <IconPin small />
-                  <span>Fixados</span>
-                </div>
-                <div className="cards-grid">
-                  {pinnedItems.map(item => (
-                    <BrainCard key={item.id} item={item} copiedId={copiedId} onPin={togglePin} onDelete={deleteItem} onCopy={copyItem} onEdit={editItem} />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {unpinnedItems.length > 0 && (
-              <section className="section">
-                {pinnedItems.length > 0 && (
-                  <div className="section-label-row">
-                    <span>Recentes</span>
+          {loading ? (
+            <div className="cards-grid">
+              {[1, 2, 3, 4].map(i => <SkeletonCard key={i} />)}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="empty-state">
+              {query ? (
+                <><div className="empty-icon"><IconSearch /></div><p className="empty-title">Nenhum resultado para "{query}"</p><p className="empty-sub">Tente palavras-chave diferentes ou limpe a pesquisa</p></>
+              ) : (
+                <><div className="empty-icon"><IconBrain /></div><p className="empty-title">Seu memory depo está vazio</p><p className="empty-sub">Comece a capturar notas, ideias, links e trechos acima</p>
+                  <button className="empty-cta" onClick={() => textareaRef.current?.focus()} type="button">Criar primeira memória</button></>
+              )}
+            </div>
+          ) : (
+            <>
+              {pinnedItems.length > 0 && (
+                <section className="section">
+                  <div className="section-label-row"><IconPin small /><span>Fixados</span></div>
+                  <div className="cards-grid">
+                    {pinnedItems.map(item => <BrainCard key={item.id} item={item} copiedId={copiedId} onPin={togglePin} onDelete={handleDelete} onCopy={copyItem} onEdit={editItem} />)}
                   </div>
-                )}
-                <div className="cards-grid">
-                  {unpinnedItems.map(item => (
-                    <BrainCard key={item.id} item={item} copiedId={copiedId} onPin={togglePin} onDelete={deleteItem} onCopy={copyItem} onEdit={editItem} />
-                  ))}
-                </div>
-              </section>
-            )}
-          </>
-        )}
-      </main>
+                </section>
+              )}
+              {unpinnedItems.length > 0 && (
+                <section className="section">
+                  {pinnedItems.length > 0 && <div className="section-label-row"><span>Recentes</span></div>}
+                  <div className="cards-grid">
+                    {unpinnedItems.map(item => <BrainCard key={item.id} item={item} copiedId={copiedId} onPin={togglePin} onDelete={handleDelete} onCopy={copyItem} onEdit={editItem} />)}
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+        </main>
+      </div>
+
+      <Modal open={!!modalConfig} title={modalConfig?.title} message={modalConfig?.message}
+        confirmLabel={modalConfig?.confirmLabel} cancelLabel={modalConfig?.cancelLabel}
+        tone={modalConfig?.tone} onConfirm={modalConfig?.onConfirm} onCancel={modalConfig?.onCancel} />
+    </>
+  )
+}
+
+function SkeletonCard() {
+  return (
+    <div className="brain-card skeleton-card">
+      <div className="card-accent skeleton-accent" />
+      <div className="card-main">
+        <div className="skeleton-line skeleton-line-full" />
+        <div className="skeleton-line skeleton-line-wide" />
+        <div className="skeleton-line skeleton-line-medium" />
+        <div className="skeleton-tags"><span className="skeleton-tag" /><span className="skeleton-tag" /></div>
+      </div>
+      <div className="card-footer"><div className="skeleton-line skeleton-line-short" /></div>
     </div>
   )
 }
@@ -458,178 +487,31 @@ export default function App() {
 function BrainCard({ item, copiedId, onPin, onDelete, onCopy, onEdit }) {
   const meta = TYPE_META[item.type]
   const isCopied = copiedId === item.id
-
   return (
     <div className="brain-card" style={{ '--card-color': meta.color, '--card-dim': meta.dim, '--card-border': meta.border }}>
       <div className="card-accent" />
       <div className="card-main">
-        <div className={`card-content${item.type === 'snippet' ? ' mono' : ''}`}>
-          {item.content}
-        </div>
+        <div className={`card-content${item.type === 'snippet' ? ' mono' : ''}`}>{item.content}</div>
         {item.url && (
           <a href={item.url} className="card-url" target="_blank" rel="noopener noreferrer">
-            <IconLink />
-            <span className="card-url-text">{item.url}</span>
+            <IconLink /><span className="card-url-text">{item.url}</span>
           </a>
         )}
         {item.tags.length > 0 && (
-          <div className="card-tags">
-            {item.tags.map(t => <span key={t} className="tag">{t}</span>)}
-          </div>
+          <div className="card-tags">{item.tags.map(t => <span key={t} className="tag">{t}</span>)}</div>
         )}
       </div>
       <div className="card-footer">
-        <span className="card-meta">
-          <span className="card-type-dot" style={{ background: meta.color }} />
-          {meta.label} · {formatRelative(item.updatedAt ?? item.createdAt)}
-        </span>
+        <span className="card-meta"><span className="card-type-dot" style={{ background: meta.color }} />{meta.label} · {formatRelative(item.updatedAt ?? item.createdAt)}</span>
         <div className="card-actions">
-          <button
-            className="card-btn"
-            onClick={() => onEdit(item)}
-            aria-label="Editar"
-            title="Editar"
-            type="button"
-          >
-            <IconEdit />
-          </button>
-          <button
-            className={`card-btn${isCopied ? ' success' : ''}`}
-            onClick={() => onCopy(item)}
-            aria-label={isCopied ? 'Copiado' : 'Copiar'}
-            title="Copiar"
-            type="button"
-          >
+          <button className="card-btn" onClick={() => onEdit(item)} aria-label="Editar" title="Editar" type="button"><IconEdit /></button>
+          <button className={`card-btn${isCopied ? ' success' : ''}`} onClick={() => onCopy(item)} aria-label={isCopied ? 'Copiado' : 'Copiar'} title="Copiar" type="button">
             {isCopied ? <IconCheck /> : <IconCopy />}
           </button>
-          <button
-            className={`card-btn${item.pinned ? ' active' : ''}`}
-            onClick={() => onPin(item.id)}
-            aria-label={item.pinned ? 'Desafixar' : 'Fixar'}
-            title={item.pinned ? 'Desafixar' : 'Fixar'}
-            type="button"
-          >
-            <IconPin />
-          </button>
-          <button
-            className="card-btn danger"
-            onClick={() => onDelete(item.id)}
-            aria-label="Excluir"
-            title="Excluir"
-            type="button"
-          >
-            <IconTrash />
-          </button>
+          <button className={`card-btn${item.pinned ? ' active' : ''}`} onClick={() => onPin(item.id)} aria-label={item.pinned ? 'Desafixar' : 'Fixar'} title={item.pinned ? 'Desafixar' : 'Fixar'} type="button"><IconPin /></button>
+          <button className="card-btn danger" onClick={() => onDelete(item.id)} aria-label="Excluir" title="Excluir" type="button"><IconTrash /></button>
         </div>
       </div>
     </div>
-  )
-}
-
-function TypeIcon({ type }) {
-  const s = { width: 12, height: 12 }
-  if (type === 'note') return (
-    <svg {...s} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-      <path d="M3 4h10M3 8h10M3 12h6" />
-    </svg>
-  )
-  if (type === 'idea') return (
-    <svg {...s} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-      <path d="M8 2.5a4.5 4.5 0 013 7.7V12H5v-1.8A4.5 4.5 0 018 2.5z" />
-      <path d="M6 14h4M6.5 15.5h3" />
-    </svg>
-  )
-  if (type === 'link') return (
-    <svg {...s} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-      <path d="M6.5 9.5a3 3 0 004.24 0l2-2a3 3 0 00-4.24-4.24l-1 1" />
-      <path d="M9.5 6.5a3 3 0 00-4.24 0l-2 2a3 3 0 004.24 4.24l1-1" />
-    </svg>
-  )
-  if (type === 'snippet') return (
-    <svg {...s} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-      <path d="M5 4l-3 4 3 4M11 4l3 4-3 4" />
-    </svg>
-  )
-  return null
-}
-
-function IconSearch() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-      <circle cx="7" cy="7" r="5.5" />
-      <path d="M13 13l-2.5-2.5" />
-    </svg>
-  )
-}
-
-function IconX() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-      <path d="M2 2l8 8M10 2l-8 8" />
-    </svg>
-  )
-}
-
-function IconPin({ small }) {
-  const size = small ? 11 : 13
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9.5 2.5l4 4-4.5 4.5L7.5 9.5 4 13l-1.5-1.5L6 8 4.5 6.5l4.5-4.5z" />
-      <path d="M7.5 9.5l-3-3" />
-    </svg>
-  )
-}
-
-function IconTrash() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2.5 4h11M5.5 4V3a1 1 0 011-1h3a1 1 0 011 1v1M6.5 7v5M9.5 7v5M3.5 4l1 9h7l1-9" />
-    </svg>
-  )
-}
-
-function IconCopy() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-      <rect x="4" y="4" width="8" height="8" rx="1.5" />
-      <path d="M10 4V3a1 1 0 00-1-1H3a1 1 0 00-1 1v6a1 1 0 001 1h1" />
-    </svg>
-  )
-}
-
-function IconCheck() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2 7l4 4 6-6" />
-    </svg>
-  )
-}
-
-function IconEdit() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9.5 2.5l2 2L5 11H3v-2l6.5-6.5z" />
-      <path d="M8.5 3.5l2 2" />
-    </svg>
-  )
-}
-
-function IconLink() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-      <path d="M5.5 8.5a2.5 2.5 0 003.54 0l1.67-1.67a2.5 2.5 0 00-3.54-3.54l-.83.83" />
-      <path d="M8.5 5.5a2.5 2.5 0 00-3.54 0L3.29 7.17a2.5 2.5 0 003.54 3.54l.83-.83" />
-    </svg>
-  )
-}
-
-function IconBrain() {
-  return (
-    <svg width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 6C9.8 6 8 7.8 8 10c0 .7.2 1.4.5 2C7 12.5 6 13.7 6 15c0 1.1.5 2.1 1.3 2.7C7.1 18.1 7 18.5 7 19c0 2.2 1.8 4 4 4h2" />
-      <path d="M20 6c2.2 0 4 1.8 4 4 0 .7-.2 1.4-.5 2 1.5.5 2.5 1.7 2.5 3 0 1.1-.5 2.1-1.3 2.7.2.4.3.8.3 1.3 0 2.2-1.8 4-4 4h-2" />
-      <path d="M16 6v20" />
-      <path d="M12 14h2M18 14h2M12 19h2M18 19h2" />
-    </svg>
   )
 }
