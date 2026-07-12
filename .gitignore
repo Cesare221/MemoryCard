@@ -2,3 +2,9 @@ node_modules
 dist
 second-brain-main/dist
 .worktrees/
+.env
+.env.example
+Login-Form-Lamp.zip
+tmp-login-form/
+.superpowers/
+public/brain.PNG
