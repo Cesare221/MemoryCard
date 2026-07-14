@@ -364,9 +364,13 @@ body::after {
 }
 
 /* ─── Textarea ────────────────────────────────────── */
+.textarea-shell {
+  position: relative;
+}
+
 .quick-textarea {
   width: 100%;
-  padding: 12px 14px;
+  padding: 12px 46px 12px 14px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -378,6 +382,31 @@ body::after {
   min-height: 80px;
   outline: none;
   transition: all var(--transition);
+}
+
+.textarea-expand-btn {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+}
+
+.textarea-expand-btn:hover,
+.textarea-expand-btn:focus-visible {
+  color: var(--text);
+  border-color: var(--type-border, var(--border-hover));
+  background: var(--type-dim, rgba(255, 255, 255, 0.06));
+  outline: none;
 }
 
 .quick-textarea::placeholder { color: var(--text-muted); }
@@ -591,11 +620,58 @@ body::after {
 
 /* ─── Card Content ────────────────────────────────── */
 .card-content {
+  position: relative;
   font-size: 0.9rem;
   color: var(--text-secondary);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.card-content.is-collapsed {
+  max-height: 10.1rem;
+  overflow: hidden;
+}
+
+.card-content.is-collapsed::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3.5rem;
+  background: linear-gradient(to bottom, rgba(20, 17, 16, 0), var(--surface));
+  pointer-events: none;
+}
+
+.card-content.is-expanded {
+  max-height: none;
+}
+
+.card-expand-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--card-border, var(--border));
+  background: var(--card-dim, rgba(255, 255, 255, 0.05));
+  color: var(--card-color, var(--text-secondary));
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.card-expand-btn:hover,
+.card-expand-btn:focus-visible {
+  color: var(--text);
+  border-color: var(--card-color, var(--border-hover));
+  background: rgba(255, 255, 255, 0.06);
+  outline: none;
 }
 
 .card-content.mono {
@@ -1143,6 +1219,92 @@ body::after {
   border: 0;
 }
 
+.focus-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.64);
+  backdrop-filter: blur(6px);
+  animation: modalFadeIn 0.2s ease;
+}
+
+.focus-editor-dialog {
+  width: min(820px, 100%);
+  max-height: min(760px, calc(100dvh - 48px));
+  display: grid;
+  grid-template-rows: auto minmax(280px, 1fr) auto;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--border-hover);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  animation: modalSlideUp 0.25s ease;
+}
+
+.focus-editor-header,
+.focus-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.focus-editor-kicker {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.focus-editor-title {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.focus-close-btn {
+  width: 38px;
+  height: 38px;
+}
+
+.focus-editor-textarea {
+  width: 100%;
+  min-height: 280px;
+  resize: none;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.65;
+  outline: none;
+}
+
+.focus-editor-textarea:focus {
+  border-color: var(--type-color, var(--accent));
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.focus-editor-count {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.focus-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 @media (max-width: 600px) {
   .header { padding: 0 16px; }
   .header-sub { display: none; }
@@ -1155,6 +1317,28 @@ body::after {
   .btn-shortcut { display: none; }
   .type-selector { gap: 5px; }
   .type-pill { padding: 5px 10px; font-size: 0.75rem; }
+  .focus-editor-overlay {
+    align-items: stretch;
+    padding: 10px;
+  }
+  .focus-editor-dialog {
+    max-height: calc(100dvh - 20px);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    padding: 14px;
+  }
+  .focus-editor-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .focus-editor-actions {
+    width: 100%;
+  }
+  .focus-editor-actions .ghost-btn,
+  .focus-editor-actions .btn-primary {
+    flex: 1;
+    justify-content: center;
+    min-height: 42px;
+  }
 }
 
 /* ─── Modal ────────────────────────────────────────── */

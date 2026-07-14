@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import './styles.css'
 import LoginScreen from './components/LoginScreen.jsx'
 import Modal from './components/Modal.jsx'
-import { IconSearch, IconX, IconPin, IconTrash, IconCopy, IconCheck, IconEdit, IconLink, IconBrain, IconSun, IconMoon, TypeIcon } from './components/Icons.jsx'
+import { IconSearch, IconX, IconPin, IconTrash, IconCopy, IconCheck, IconEdit, IconLink, IconBrain, IconSun, IconMoon, IconChevronDown, IconChevronUp, IconMaximize, TypeIcon } from './components/Icons.jsx'
 import {
   signUp, signIn, signOut, tryRestoreSession, isMigrationDone, markMigrationDone,
   detectLegacyItems, clearLegacyStorage, updatePassword,
@@ -26,6 +26,9 @@ const FILTERS = [
   { value: 'link', label: 'Links' },
   { value: 'snippet', label: 'Trechos' },
 ]
+
+const CARD_PREVIEW_LIMIT = 360
+const CARD_PREVIEW_LINES = 7
 
 function createId() {
   const cryptoObj = globalThis.crypto
@@ -59,6 +62,7 @@ export default function App() {
   const [passwordResetMode, setPasswordResetMode] = useState(false)
   const [loading, setLoading] = useState(true)
   const [modalConfig, setModalConfig] = useState(null)
+  const [focusEditorOpen, setFocusEditorOpen] = useState(false)
 
   const { theme, toggleTheme } = useTheme()
   const {
@@ -68,6 +72,7 @@ export default function App() {
 
   const searchRef = useRef(null)
   const textareaRef = useRef(null)
+  const focusTextareaRef = useRef(null)
   const fileInputRef = useRef(null)
   const statusTimerRef = useRef(null)
 
@@ -233,6 +238,12 @@ export default function App() {
     }
   }, [editingId, formContent, formTags, formType, formUrl, session, resetForm, showStatus, addItem, updateItem])
 
+  const addOrUpdateFromFocus = useCallback(async () => {
+    if (!formContent.trim()) return
+    setFocusEditorOpen(false)
+    await addOrUpdateItem()
+  }, [formContent, addOrUpdateItem])
+
   const handleDelete = useCallback((itemId) => {
     const item = items.find(i => i.id === itemId)
     if (!item) return
@@ -308,6 +319,20 @@ export default function App() {
   const pinnedItems = filtered.filter(i => i.pinned)
   const unpinnedItems = filtered.filter(i => !i.pinned)
   const meta = TYPE_META[formType]
+  const quickTextareaRows = Math.min(8, Math.max(3, formContent.split('\n').length, Math.ceil(formContent.length / 90)))
+
+  useEffect(() => {
+    if (!focusEditorOpen) return
+    const timer = window.setTimeout(() => focusTextareaRef.current?.focus(), 0)
+    const handler = (e) => {
+      if (e.key === 'Escape') setFocusEditorOpen(false)
+    }
+    document.addEventListener('keydown', handler)
+    return () => {
+      window.clearTimeout(timer)
+      document.removeEventListener('keydown', handler)
+    }
+  }, [focusEditorOpen])
 
   if (!session || passwordResetMode) {
     return (
@@ -388,10 +413,18 @@ export default function App() {
               ))}
             </div>
 
+            <div className="textarea-shell">
             <textarea ref={textareaRef} className="quick-textarea" placeholder={meta.placeholder}
+                style={{ minHeight: `${Math.min(220, Math.max(80, quickTextareaRows * 24 + 32))}px` }}
               value={formContent} onChange={e => setFormContent(e.target.value)}
               onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') addOrUpdateItem() }}
               rows={3} aria-label="Conteúdo" />
+
+              <button className="textarea-expand-btn" onClick={() => setFocusEditorOpen(true)}
+                type="button" aria-label="Abrir editor em foco" title="Abrir editor em foco">
+                <IconMaximize />
+              </button>
+            </div>
 
             {formType === 'link' && (
               <input type="url" className="form-input" placeholder="https://…"
@@ -465,6 +498,37 @@ export default function App() {
       <Modal open={!!modalConfig} title={modalConfig?.title} message={modalConfig?.message}
         confirmLabel={modalConfig?.confirmLabel} cancelLabel={modalConfig?.cancelLabel}
         tone={modalConfig?.tone} onConfirm={modalConfig?.onConfirm} onCancel={modalConfig?.onCancel} />
+      {focusEditorOpen && (
+        <div className="focus-editor-overlay" role="presentation" onMouseDown={(e) => {
+          if (e.target === e.currentTarget) setFocusEditorOpen(false)
+        }}>
+          <section className="focus-editor-dialog" role="dialog" aria-modal="true" aria-label="Editor em foco">
+            <div className="focus-editor-header">
+              <div>
+                <p className="focus-editor-kicker">{editingId ? 'Editando' : 'Nova memoria'} / {meta.label}</p>
+                <h2 className="focus-editor-title">Editor em foco</h2>
+              </div>
+              <button className="card-btn focus-close-btn" onClick={() => setFocusEditorOpen(false)}
+                type="button" aria-label="Fechar editor em foco" title="Fechar editor em foco">
+                <IconX />
+              </button>
+            </div>
+            <textarea ref={focusTextareaRef} className="focus-editor-textarea"
+              value={formContent} onChange={e => setFormContent(e.target.value)}
+              onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') addOrUpdateFromFocus() }}
+              aria-label="Conteudo em foco" />
+            <div className="focus-editor-footer">
+              <span className="focus-editor-count">{formContent.trim().length} caracteres</span>
+              <div className="focus-editor-actions">
+                <button className="ghost-btn" onClick={() => setFocusEditorOpen(false)} type="button">Concluir</button>
+                <button className="btn-primary" onClick={addOrUpdateFromFocus} disabled={!formContent.trim()} type="button">
+                  {editingId ? 'Salvar alteracoes' : 'Adicionar'}
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
     </>
   )
 }
@@ -487,11 +551,26 @@ function SkeletonCard() {
 function BrainCard({ item, copiedId, onPin, onDelete, onCopy, onEdit }) {
   const meta = TYPE_META[item.type]
   const isCopied = copiedId === item.id
+  const [expanded, setExpanded] = useState(false)
+  const lineCount = item.content.split('\n').length
+  const canExpand = item.content.length > CARD_PREVIEW_LIMIT || lineCount > CARD_PREVIEW_LINES
+  const contentClassName = [
+    'card-content',
+    item.type === 'snippet' ? 'mono' : '',
+    canExpand ? (expanded ? 'is-expanded' : 'is-collapsed') : '',
+  ].filter(Boolean).join(' ')
   return (
     <div className="brain-card" style={{ '--card-color': meta.color, '--card-dim': meta.dim, '--card-border': meta.border }}>
       <div className="card-accent" />
       <div className="card-main">
-        <div className={`card-content${item.type === 'snippet' ? ' mono' : ''}`}>{item.content}</div>
+        <div className={contentClassName}>{item.content}</div>
+        {canExpand && (
+          <button className="card-expand-btn" onClick={() => setExpanded(value => !value)}
+            type="button" aria-expanded={expanded} aria-label={expanded ? 'Recolher ideia' : 'Ver ideia completa'}>
+            {expanded ? <IconChevronUp /> : <IconChevronDown />}
+            {expanded ? 'Ver menos' : 'Ver mais'}
+          </button>
+        )}
         {item.url && (
           <a href={item.url} className="card-url" target="_blank" rel="noopener noreferrer">
             <IconLink /><span className="card-url-text">{item.url}</span>
