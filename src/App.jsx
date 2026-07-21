@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import './styles.css'
 import LoginScreen from './components/LoginScreen.jsx'
 import Modal from './components/Modal.jsx'
-import { IconSearch, IconX, IconPin, IconTrash, IconCopy, IconCheck, IconEdit, IconLink, IconBrain, IconSun, IconMoon, IconChevronDown, IconChevronUp, IconMaximize, TypeIcon } from './components/Icons.jsx'
+import { IconSearch, IconX, IconPin, IconTrash, IconCopy, IconCheck, IconEdit, IconLink, IconBrain, IconSun, IconMoon, IconChevronDown, IconChevronUp, IconMaximize, IconImage, TypeIcon } from './components/Icons.jsx'
 import {
   signUp, signIn, signOut, tryRestoreSession, isMigrationDone, markMigrationDone,
   detectLegacyItems, clearLegacyStorage, updatePassword,
@@ -21,6 +21,7 @@ const TYPE_META = {
 
 const FILTERS = [
   { value: 'all', label: 'Tudo' },
+  { value: 'images', label: 'Imagens' },
   { value: 'note', label: 'Notas' },
   { value: 'idea', label: 'Ideias' },
   { value: 'link', label: 'Links' },
@@ -29,6 +30,11 @@ const FILTERS = [
 
 const CARD_PREVIEW_LIMIT = 360
 const CARD_PREVIEW_LINES = 7
+const IMAGE_MAX_SOURCE_BYTES = 6 * 1024 * 1024
+const IMAGE_MAX_DATA_URL_CHARS = 950000
+const IMAGE_MAX_DIMENSION = 1280
+const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/gif'
+const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 
 function createId() {
   const cryptoObj = globalThis.crypto
@@ -44,6 +50,57 @@ function formatRelative(ts) {
   return new Intl.DateTimeFormat('pt-BR', { month: 'short', day: 'numeric' }).format(new Date(ts))
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('Nao foi possivel ler a imagem.'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('Nao foi possivel processar a imagem.'))
+    image.src = dataUrl
+  })
+}
+
+async function prepareMemoryImage(file) {
+  if (!file) return ''
+  if (!IMAGE_TYPES.has(file.type)) throw new Error('Use uma imagem JPG, PNG, WebP ou GIF.')
+  if (file.size > IMAGE_MAX_SOURCE_BYTES) throw new Error('Escolha uma imagem de ate 6 MB.')
+
+  const original = await readFileAsDataUrl(file)
+  if (file.type === 'image/gif') {
+    if (original.length > IMAGE_MAX_DATA_URL_CHARS) throw new Error('Este GIF ficou grande demais para salvar.')
+    return original
+  }
+
+  const image = await loadImage(original)
+  const width = image.naturalWidth || image.width
+  const height = image.naturalHeight || image.height
+  const largestSide = Math.max(width, height)
+  if (largestSide <= IMAGE_MAX_DIMENSION && original.length <= IMAGE_MAX_DATA_URL_CHARS) return original
+
+  const scale = Math.min(1, IMAGE_MAX_DIMENSION / largestSide)
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(width * scale))
+  canvas.height = Math.max(1, Math.round(height * scale))
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Nao foi possivel comprimir a imagem.')
+  context.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+  for (const quality of [0.86, 0.76, 0.66, 0.56]) {
+    const compressed = canvas.toDataURL('image/jpeg', quality)
+    if (compressed.length <= IMAGE_MAX_DATA_URL_CHARS) return compressed
+  }
+
+  throw new Error('A imagem ficou grande demais mesmo depois da compressao.')
+}
+
 export default function App() {
   const [session, setSession] = useState(() => tryRestoreSession())
   const [query, setQuery] = useState('')
@@ -52,6 +109,8 @@ export default function App() {
   const [formContent, setFormContent] = useState('')
   const [formTags, setFormTags] = useState('')
   const [formUrl, setFormUrl] = useState('')
+  const [formImageData, setFormImageData] = useState('')
+  const [formImageName, setFormImageName] = useState('')
   const [editingId, setEditingId] = useState(null)
   const [copiedId, setCopiedId] = useState(null)
   const [status, setStatus] = useState(null)
@@ -74,6 +133,7 @@ export default function App() {
   const textareaRef = useRef(null)
   const focusTextareaRef = useRef(null)
   const fileInputRef = useRef(null)
+  const imageInputRef = useRef(null)
   const statusTimerRef = useRef(null)
 
   useEffect(() => {
@@ -185,6 +245,7 @@ export default function App() {
 
   const counts = useMemo(() => ({
     all: items.length,
+    images: items.filter(i => i.imageData).length,
     note: items.filter(i => i.type === 'note').length,
     idea: items.filter(i => i.type === 'idea').length,
     link: items.filter(i => i.type === 'link').length,
@@ -193,11 +254,12 @@ export default function App() {
 
   const filtered = useMemo(() => {
     let result = [...items]
-    if (filterType !== 'all') result = result.filter(i => i.type === filterType)
+    if (filterType === 'images') result = result.filter(i => i.imageData)
+    else if (filterType !== 'all') result = result.filter(i => i.type === filterType)
     if (query.trim()) {
       const q = query.toLowerCase()
       result = result.filter(i =>
-        i.content.toLowerCase().includes(q) ||
+        (i.content || '').toLowerCase().includes(q) ||
         (i.url && i.url.toLowerCase().includes(q)) ||
         i.tags.some(t => t.toLowerCase().includes(q))
       )
@@ -215,34 +277,56 @@ export default function App() {
     setFormContent('')
     setFormTags('')
     setFormUrl('')
+    setFormImageData('')
+    setFormImageName('')
   }, [])
 
   const addOrUpdateItem = useCallback(async () => {
-    if (!formContent.trim()) return
+    if (!formContent.trim() && !formImageData) return
     const tags = formTags.split(',').map(t => t.trim()).filter(Boolean)
     const content = formContent.trim()
     const url = formType === 'link' ? formUrl.trim() : ''
     const now = Date.now()
 
     if (editingId) {
-      await updateItem(editingId, { type: formType, content, url, tags, updatedAt: now })
+      await updateItem(editingId, { type: formType, content, url, tags, imageData: formImageData, updatedAt: now })
       resetForm()
       textareaRef.current?.focus()
       showStatus('Memória atualizada.', 'success')
     } else {
-      const newItem = { id: createId(), type: formType, content, url, tags, pinned: false, createdAt: now, updatedAt: now, user_id: session?.id }
-      await addItem(newItem.type, newItem.content, newItem.tags, newItem.url)
+      const newItem = { id: createId(), type: formType, content, url, tags, imageData: formImageData, pinned: false, createdAt: now, updatedAt: now, user_id: session?.id }
+      await addItem(newItem.type, newItem.content, newItem.tags, newItem.url, newItem.imageData)
       resetForm()
       textareaRef.current?.focus()
       showStatus('Memória adicionada.', 'success')
     }
-  }, [editingId, formContent, formTags, formType, formUrl, session, resetForm, showStatus, addItem, updateItem])
+  }, [editingId, formContent, formTags, formType, formUrl, formImageData, session, resetForm, showStatus, addItem, updateItem])
 
   const addOrUpdateFromFocus = useCallback(async () => {
-    if (!formContent.trim()) return
+    if (!formContent.trim() && !formImageData) return
     setFocusEditorOpen(false)
     await addOrUpdateItem()
-  }, [formContent, addOrUpdateItem])
+  }, [formContent, formImageData, addOrUpdateItem])
+
+  const handleImageSelect = useCallback(async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    try {
+      const imageData = await prepareMemoryImage(file)
+      setFormImageData(imageData)
+      setFormImageName(file.name)
+      showStatus('Imagem adicionada a memoria.', 'success')
+    } catch (error) {
+      showStatus(error.message || 'Nao foi possivel adicionar a imagem.', 'error')
+    }
+  }, [showStatus])
+
+  const removeFormImage = useCallback(() => {
+    setFormImageData('')
+    setFormImageName('')
+    showStatus('Imagem removida.', 'info')
+  }, [showStatus])
 
   const handleDelete = useCallback((itemId) => {
     const item = items.find(i => i.id === itemId)
@@ -267,6 +351,8 @@ export default function App() {
     setFormContent(item.content)
     setFormTags(item.tags.join(', '))
     setFormUrl(item.url ?? '')
+    setFormImageData(item.imageData ?? '')
+    setFormImageName(item.imageData ? 'Imagem anexada' : '')
     showStatus('Editando memória.', 'info')
     textareaRef.current?.focus()
   }, [showStatus])
@@ -320,6 +406,7 @@ export default function App() {
   const unpinnedItems = filtered.filter(i => !i.pinned)
   const meta = TYPE_META[formType]
   const quickTextareaRows = Math.min(8, Math.max(3, formContent.split('\n').length, Math.ceil(formContent.length / 90)))
+  const hasDraft = Boolean(formContent.trim() || formImageData)
 
   useEffect(() => {
     if (!focusEditorOpen) return
@@ -432,11 +519,31 @@ export default function App() {
                 onKeyDown={e => e.key === 'Enter' && addOrUpdateItem()} aria-label="URL" />
             )}
 
+            <div className="image-attach-row">
+              <button className={`ghost-btn image-attach-btn${formImageData ? ' active' : ''}`}
+                onClick={() => imageInputRef.current?.click()} type="button">
+                <IconImage />{formImageData ? 'Trocar imagem' : 'Adicionar imagem'}
+              </button>
+              {formImageData && (
+                <button className="ghost-btn image-remove-btn" onClick={removeFormImage} type="button">
+                  <IconX />Remover imagem
+                </button>
+              )}
+              <input ref={imageInputRef} className="visually-hidden" type="file" accept={IMAGE_ACCEPT} onChange={handleImageSelect} />
+            </div>
+
+            {formImageData && (
+              <div className="image-preview">
+                <img src={formImageData} alt="Previa da imagem da memoria" />
+                <span>{formImageName || 'Imagem anexada'}</span>
+              </div>
+            )}
+
             <div className="quick-footer">
               <input type="text" className="form-input" placeholder="Tags: design, todo, referência"
                 value={formTags} onChange={e => setFormTags(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && addOrUpdateItem()} aria-label="Tags" />
-              <button className="btn-primary" onClick={addOrUpdateItem} disabled={!formContent.trim()} type="button">
+              <button className="btn-primary" onClick={addOrUpdateItem} disabled={!hasDraft} type="button">
                 {editingId ? 'Salvar alterações' : 'Adicionar'}
                 <span className="btn-shortcut">⌘↵</span>
               </button>
@@ -521,7 +628,7 @@ export default function App() {
               <span className="focus-editor-count">{formContent.trim().length} caracteres</span>
               <div className="focus-editor-actions">
                 <button className="ghost-btn" onClick={() => setFocusEditorOpen(false)} type="button">Concluir</button>
-                <button className="btn-primary" onClick={addOrUpdateFromFocus} disabled={!formContent.trim()} type="button">
+                <button className="btn-primary" onClick={addOrUpdateFromFocus} disabled={!hasDraft} type="button">
                   {editingId ? 'Salvar alteracoes' : 'Adicionar'}
                 </button>
               </div>
@@ -552,8 +659,9 @@ function BrainCard({ item, copiedId, onPin, onDelete, onCopy, onEdit }) {
   const meta = TYPE_META[item.type]
   const isCopied = copiedId === item.id
   const [expanded, setExpanded] = useState(false)
-  const lineCount = item.content.split('\n').length
-  const canExpand = item.content.length > CARD_PREVIEW_LIMIT || lineCount > CARD_PREVIEW_LINES
+  const content = item.content || ''
+  const lineCount = content.split('\n').length
+  const canExpand = content.length > CARD_PREVIEW_LIMIT || lineCount > CARD_PREVIEW_LINES
   const contentClassName = [
     'card-content',
     item.type === 'snippet' ? 'mono' : '',
@@ -563,7 +671,8 @@ function BrainCard({ item, copiedId, onPin, onDelete, onCopy, onEdit }) {
     <div className="brain-card" style={{ '--card-color': meta.color, '--card-dim': meta.dim, '--card-border': meta.border }}>
       <div className="card-accent" />
       <div className="card-main">
-        <div className={contentClassName}>{item.content}</div>
+        {item.imageData && <img className="card-image" src={item.imageData} alt="Imagem anexada a memoria" loading="lazy" />}
+        {content && <div className={contentClassName}>{content}</div>}
         {canExpand && (
           <button className="card-expand-btn" onClick={() => setExpanded(value => !value)}
             type="button" aria-expanded={expanded} aria-label={expanded ? 'Recolher ideia' : 'Ver ideia completa'}>

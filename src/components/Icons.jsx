@@ -12,6 +12,7 @@ export function IconMoon() { return <svg width="15" height="15" viewBox="0 0 24 
 export function IconChevronDown() { return <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5l4 4 4-4" /></svg> }
 export function IconChevronUp() { return <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l4-4 4 4" /></svg> }
 export function IconMaximize() { return <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3H3v3M10 3h3v3M6 13H3v-3M10 13h3v-3" /><path d="M3 3l4 4M13 3l-4 4M3 13l4-4M13 13l-4-4" /></svg> }
+export function IconImage() { return <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="12" height="10" rx="2" /><circle cx="6" cy="7" r="1.2" /><path d="M3.8 12l3.4-3.4 2.2 2.2 1.2-1.2L14 13" /></svg> }
 
 export function TypeIcon({ type }) {
   const s = { width: 12, height: 12 }

@@ -40,6 +40,17 @@ describe('normalizeItems', () => {
     expect(normalizeItems(items)[0].url).toBe('')
   })
 
+  it('normalizes imageData to empty string when missing', () => {
+    const items = [{ id: '1', type: 'note', content: 'test', tags: [], pinned: false, createdAt: 1000 }]
+    expect(normalizeItems(items)[0].imageData).toBe('')
+  })
+
+  it('preserves imageData when provided', () => {
+    const imageData = 'data:image/png;base64,abc123'
+    const items = [{ id: '1', type: 'note', content: 'test', imageData, tags: [], pinned: false, createdAt: 1000 }]
+    expect(normalizeItems(items)[0].imageData).toBe(imageData)
+  })
+
   it('uses createdAt for updatedAt when updatedAt is missing', () => {
     const items = [{ id: '1', type: 'note', content: 'test', tags: [], pinned: false, url: '', createdAt: 1000 }]
     expect(normalizeItems(items)[0].updatedAt).toBe(1000)

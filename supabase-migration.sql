@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS memory_items (
   type TEXT NOT NULL CHECK (type IN ('note', 'idea', 'link', 'snippet')),
   content TEXT NOT NULL,
   url TEXT DEFAULT '',
+  image_data TEXT DEFAULT '',
   tags TEXT[] DEFAULT '{}',
   pinned BOOLEAN DEFAULT false,
   created_at BIGINT NOT NULL,
@@ -18,6 +19,9 @@ CREATE INDEX IF NOT EXISTS idx_memory_items_updated_at ON memory_items(updated_a
 
 -- Enable Row Level Security
 ALTER TABLE memory_items ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE memory_items
+  ADD COLUMN IF NOT EXISTS image_data TEXT DEFAULT '';
 
 -- Policy: users can only SELECT their own items
 CREATE POLICY select_own_items ON memory_items

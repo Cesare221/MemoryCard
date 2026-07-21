@@ -45,10 +45,22 @@ vi.mock('../hooks/useMemories.js', () => ({
         type: 'idea',
         content: longIdea,
         url: '',
+        imageData: 'data:image/png;base64,abc123',
         tags: ['produto'],
         pinned: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
+      },
+      {
+        id: 'note-1',
+        type: 'note',
+        content: 'Memoria sem imagem',
+        url: '',
+        imageData: '',
+        tags: [],
+        pinned: false,
+        createdAt: Date.now() - 1000,
+        updatedAt: Date.now() - 1000,
       },
     ],
     setItems: vi.fn(),
@@ -96,5 +108,17 @@ describe('App long content affordances', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Fechar editor em foco' }))
     expect(screen.queryByRole('dialog', { name: 'Editor em foco' })).toBeNull()
+  })
+
+  it('shows image memories in the Imagens filter', async () => {
+    render(<App />)
+
+    expect(await screen.findByRole('img', { name: 'Imagem anexada a memoria' })).toBeInTheDocument()
+    expect(screen.getByText('Memoria sem imagem')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Imagens/ }))
+
+    expect(screen.getByRole('img', { name: 'Imagem anexada a memoria' })).toBeInTheDocument()
+    expect(screen.queryByText('Memoria sem imagem')).toBeNull()
   })
 })

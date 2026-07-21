@@ -70,10 +70,10 @@ export function useMemories(session) {
     }
   }, [session, loadItems])
 
-  const addItem = useCallback(async (type, content, tags, url) => {
+  const addItem = useCallback(async (type, content, tags, url, imageData = '') => {
     if (!session) return
     const now = Date.now()
-    const newItem = { id: createId(), type, content, url: url || '', tags: tags || [], pinned: false, user_id: session.id, createdAt: now, updatedAt: now }
+    const newItem = { id: createId(), type, content, url: url || '', imageData: imageData || '', tags: tags || [], pinned: false, user_id: session.id, createdAt: now, updatedAt: now }
     setItems(prev => [newItem, ...prev])
     setSyncStatus('saving')
 

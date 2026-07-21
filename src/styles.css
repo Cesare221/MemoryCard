@@ -448,6 +448,55 @@ body::after {
   flex: 1;
 }
 
+.image-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.image-attach-btn.active {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-dim);
+}
+
+.image-attach-btn,
+.image-remove-btn {
+  gap: 6px;
+}
+
+.image-preview {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 72px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.image-preview img {
+  width: 72px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.image-preview span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ─── Buttons ─────────────────────────────────────── */
 .btn-primary {
   display: flex;
@@ -616,6 +665,16 @@ body::after {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.card-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 /* ─── Card Content ────────────────────────────────── */
