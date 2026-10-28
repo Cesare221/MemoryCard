@@ -918,6 +918,17 @@ body::after {
 }
 
 /* ─── Auth Screen ─────────────────────────────────── */
+.install-app { text-align: center; }
+.install-button { min-height: 44px; padding: 10px 16px; border: 1px solid #d4a373; border-radius: 12px; background: #121417; color: #f5f0e6; font: inherit; cursor: pointer; }
+.install-button:focus-visible { outline: 3px solid #d4a373; outline-offset: 4px; }
+.install-button:disabled { opacity: .65; cursor: wait; }
+.install-dialog { width: min(440px, calc(100% - 32px)); margin: auto; padding: 28px; border: 1px solid #686058; border-radius: 20px; background: #18191d; color: #f5f0e6; text-align: left; }
+.install-dialog::backdrop { background: rgb(0 0 0 / .7); }
+.install-dialog h2 { font-size: 1.25rem; margin: 0 0 16px; }
+.install-dialog p { color: #d1d0ce; line-height: 1.6; margin: 0 0 20px; }
+.install-dialog form { text-align: right; }
+.lamp-wrapper .install-app { margin-top: 20px; }
+
 .auth-page {
   min-height: 100dvh;
   display: grid;

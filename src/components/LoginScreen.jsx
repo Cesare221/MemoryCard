@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { sendPasswordReset } from '../services/authService.js'
+import InstallApp from './InstallApp.jsx'
 
 export default function LoginScreen({
   mode,
@@ -230,6 +231,7 @@ export default function LoginScreen({
             <path className="lamp-shade" d="M30 110 C 30 50, 170 50, 170 110 C 170 125, 30 125, 30 110 Z" />
           </svg>
           <p className="lamp-hint">Puxe o cordão para acender</p>
+          <InstallApp />
         </div>
 
         <div ref={formRef} className="login-form">

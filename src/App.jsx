@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import './styles.css'
 import LoginScreen from './components/LoginScreen.jsx'
 import Modal from './components/Modal.jsx'
+import InstallApp from './components/InstallApp.jsx'
 import { IconSearch, IconX, IconPin, IconTrash, IconCopy, IconCheck, IconEdit, IconLink, IconBrain, IconSun, IconMoon, IconChevronDown, IconChevronUp, IconMaximize, IconImage, TypeIcon } from './components/Icons.jsx'
 import {
   signUp, signIn, signOut, tryRestoreSession, isMigrationDone, markMigrationDone,
@@ -453,6 +454,7 @@ export default function App() {
               </div>
             </div>
             <div className="header-actions">
+              <InstallApp />
               <span className={`sync-badge ${syncStatus}`}>
                 {syncStatus === 'saving' && 'Salvando…'}
                 {syncStatus === 'error' && 'Erro ao salvar'}
