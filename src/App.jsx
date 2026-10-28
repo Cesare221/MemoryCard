@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import './styles.css'
+import './collection.css'
 import LoginScreen from './components/LoginScreen.jsx'
 import Modal from './components/Modal.jsx'
 import InstallApp from './components/InstallApp.jsx'
+import ActionMenu from './components/ActionMenu.jsx'
+import MemoryReader from './components/MemoryReader.jsx'
 import { IconSearch, IconX, IconPin, IconTrash, IconCopy, IconCheck, IconEdit, IconLink, IconBrain, IconSun, IconMoon, IconChevronDown, IconChevronUp, IconMaximize, IconImage, TypeIcon } from './components/Icons.jsx'
 import {
   signUp, signIn, signOut, tryRestoreSession, isMigrationDone, markMigrationDone,
@@ -105,6 +108,10 @@ async function prepareMemoryImage(file) {
 export default function App() {
   const [session, setSession] = useState(() => tryRestoreSession())
   const [query, setQuery] = useState('')
+  const [composerOpen, setComposerOpen] = useState(false)
+  const [pinnedOpen, setPinnedOpen] = useState(true)
+  const [readingItem, setReadingItem] = useState(null)
+  const [sortOrder, setSortOrder] = useState('recent')
   const [filterType, setFilterType] = useState('all')
   const [formType, setFormType] = useState('note')
   const [formContent, setFormContent] = useState('')
@@ -268,9 +275,9 @@ export default function App() {
     return result.sort((a, b) => {
       if (a.pinned && !b.pinned) return -1
       if (!a.pinned && b.pinned) return 1
-      return (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt)
+      return sortOrder === 'oldest' ? a.createdAt - b.createdAt : (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt)
     })
-  }, [items, query, filterType])
+  }, [items, query, filterType, sortOrder])
 
   const resetForm = useCallback(() => {
     setEditingId(null)
@@ -347,6 +354,7 @@ export default function App() {
   }, [showStatus])
 
   const editItem = useCallback(item => {
+    setComposerOpen(true)
     setEditingId(item.id)
     setFormType(item.type)
     setFormContent(item.content)
@@ -467,16 +475,7 @@ export default function App() {
               <span className="user-pill">{session?.name || session?.email}</span>
               <button className="ghost-btn" onClick={handleLogout} type="button">Sair</button>
             </div>
-            <div className="header-right">
-              <div className="search-wrap">
-                <span className="search-icon"><IconSearch /></span>
-                <input ref={searchRef} type="text" className="search-input" placeholder="Pesquisar… ⌘K"
-                  value={query} onChange={e => setQuery(e.target.value)} aria-label="Pesquisar" />
-                {query && (
-                  <button className="search-clear" onClick={() => setQuery('')} aria-label="Limpar pesquisa" type="button"><IconX /></button>
-                )}
-              </div>
-            </div>
+
           </div>
         </header>
 
@@ -490,7 +489,12 @@ export default function App() {
             </div>
           )}
 
-          <div className="quick-add" style={{ '--type-color': meta.color, '--type-dim': meta.dim, '--type-border': meta.border }}>
+          <div className="collection-heading"><div><h2>Suas memórias</h2><p>Um lugar para voltar às suas ideias.</p></div>
+            <ActionMenu label="Organizar"><button onClick={exportItems}>Exportar JSON</button><button onClick={() => fileInputRef.current?.click()}>Importar JSON</button></ActionMenu>
+            <input ref={fileInputRef} className="visually-hidden" type="file" accept="application/json" onChange={importItems} />
+          </div>
+          <div className={`quick-add${composerOpen || hasDraft || editingId ? ' is-open' : ' is-compact'}`} style={{ '--type-color': meta.color, '--type-dim': meta.dim, '--type-border': meta.border }}>
+            <div className="composer-options" hidden={!composerOpen && !hasDraft && !editingId}>
             <div className="type-selector">
               {Object.entries(TYPE_META).map(([value, m]) => (
                 <button key={value}
@@ -502,8 +506,9 @@ export default function App() {
               ))}
             </div>
 
+            </div>
             <div className="textarea-shell">
-            <textarea ref={textareaRef} className="quick-textarea" placeholder={meta.placeholder}
+            <textarea ref={textareaRef} className="quick-textarea" placeholder={composerOpen || hasDraft ? meta.placeholder : 'O que você quer guardar?'} onFocus={() => setComposerOpen(true)}
                 style={{ minHeight: `${Math.min(220, Math.max(80, quickTextareaRows * 24 + 32))}px` }}
               value={formContent} onChange={e => setFormContent(e.target.value)}
               onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') addOrUpdateItem() }}
@@ -515,6 +520,7 @@ export default function App() {
               </button>
             </div>
 
+            <div className="composer-options" hidden={!composerOpen && !hasDraft && !editingId}>
             {formType === 'link' && (
               <input type="url" className="form-input" placeholder="https://…"
                 value={formUrl} onChange={e => setFormUrl(e.target.value)}
@@ -552,11 +558,26 @@ export default function App() {
             </div>
 
             <div className="quick-utility-row">
-              {editingId && <button className="ghost-btn" onClick={cancelEdit} type="button">Cancelar edição</button>}
-              <button className="ghost-btn" onClick={exportItems} type="button">Exportar JSON</button>
-              <button className="ghost-btn" onClick={() => fileInputRef.current?.click()} type="button">Importar JSON</button>
-              <input ref={fileInputRef} className="visually-hidden" type="file" accept="application/json" onChange={importItems} />
+              {editingId ? <button className="ghost-btn" onClick={cancelEdit} type="button">Cancelar edição</button> :
+                <button className="ghost-btn" onClick={() => setComposerOpen(false)} disabled={hasDraft} type="button">Recolher</button>}
             </div>
+            </div>
+          </div>
+
+          <div className="collection-toolbar">
+            <div className="collection-search">
+              <div className="search-wrap">
+                <span className="search-icon"><IconSearch /></span>
+                <input ref={searchRef} type="text" className="search-input" placeholder="Buscar nas memórias…"
+                  value={query} onChange={e => setQuery(e.target.value)} aria-label="Pesquisar" />
+                {query && (
+                  <button className="search-clear" onClick={() => setQuery('')} aria-label="Limpar pesquisa" type="button"><IconX /></button>
+                )}
+              </div>
+            </div>
+            <label className="sort-control">Ordenar
+              <select value={sortOrder} onChange={e => setSortOrder(e.target.value)}><option value="recent">Mais recentes</option><option value="oldest">Mais antigas</option></select>
+            </label>
           </div>
 
           <div className="filter-row">
@@ -585,9 +606,9 @@ export default function App() {
             <>
               {pinnedItems.length > 0 && (
                 <section className="section">
-                  <div className="section-label-row"><IconPin small /><span>Fixados</span></div>
-                  <div className="cards-grid">
-                    {pinnedItems.map(item => <BrainCard key={item.id} item={item} copiedId={copiedId} onPin={togglePin} onDelete={handleDelete} onCopy={copyItem} onEdit={editItem} />)}
+                  <button className="section-label-row section-toggle" aria-expanded={pinnedOpen} aria-controls="pinned-memories" onClick={() => setPinnedOpen(value => !value)}><IconPin small /><span>Fixados ({pinnedItems.length})</span>{pinnedOpen ? <IconChevronUp /> : <IconChevronDown />}</button>
+                  <div className="cards-grid" id="pinned-memories" hidden={!pinnedOpen}>
+                    {pinnedItems.map(item => <BrainCard key={item.id} item={item} copiedId={copiedId} onPin={togglePin} onDelete={handleDelete} onCopy={copyItem} onEdit={editItem} onRead={setReadingItem} />)}
                   </div>
                 </section>
               )}
@@ -595,14 +616,16 @@ export default function App() {
                 <section className="section">
                   {pinnedItems.length > 0 && <div className="section-label-row"><span>Recentes</span></div>}
                   <div className="cards-grid">
-                    {unpinnedItems.map(item => <BrainCard key={item.id} item={item} copiedId={copiedId} onPin={togglePin} onDelete={handleDelete} onCopy={copyItem} onEdit={editItem} />)}
+                    {unpinnedItems.map(item => <BrainCard key={item.id} item={item} copiedId={copiedId} onPin={togglePin} onDelete={handleDelete} onCopy={copyItem} onEdit={editItem} onRead={setReadingItem} />)}
                   </div>
                 </section>
               )}
             </>
           )}
         </main>
+        <button className="mobile-create btn-primary" onClick={() => { setComposerOpen(true); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }}>Nova memória</button>
       </div>
+      <MemoryReader item={readingItem} onClose={() => setReadingItem(null)} onEdit={editItem} />
 
       <Modal open={!!modalConfig} title={modalConfig?.title} message={modalConfig?.message}
         confirmLabel={modalConfig?.confirmLabel} cancelLabel={modalConfig?.cancelLabel}
@@ -657,11 +680,13 @@ function SkeletonCard() {
   )
 }
 
-function BrainCard({ item, copiedId, onPin, onDelete, onCopy, onEdit }) {
+function BrainCard({ item, copiedId, onPin, onDelete, onCopy, onEdit, onRead }) {
   const meta = TYPE_META[item.type]
   const isCopied = copiedId === item.id
   const [expanded, setExpanded] = useState(false)
   const content = item.content || ''
+  let domain = ''
+  try { domain = new URL(item.url).hostname.replace(/^www\./, '') } catch {}
   const lineCount = content.split('\n').length
   const canExpand = content.length > CARD_PREVIEW_LIMIT || lineCount > CARD_PREVIEW_LINES
   const contentClassName = [
@@ -672,9 +697,10 @@ function BrainCard({ item, copiedId, onPin, onDelete, onCopy, onEdit }) {
   return (
     <div className="brain-card" style={{ '--card-color': meta.color, '--card-dim': meta.dim, '--card-border': meta.border }}>
       <div className="card-accent" />
-      <div className="card-main">
+      <div className="card-main" onClick={event => { if (!event.target.closest('button, a')) onRead(item) }}>
         {item.imageData && <img className="card-image" src={item.imageData} alt="Imagem anexada a memoria" loading="lazy" />}
         {content && <div className={contentClassName}>{content}</div>}
+        <button className="card-read" onClick={() => onRead(item)} aria-label={`Ler memória: ${content.slice(0, 60) || "Imagem"}`}>Abrir memória</button>
         {canExpand && (
           <button className="card-expand-btn" onClick={() => setExpanded(value => !value)}
             type="button" aria-expanded={expanded} aria-label={expanded ? 'Recolher ideia' : 'Ver ideia completa'}>
@@ -683,23 +709,23 @@ function BrainCard({ item, copiedId, onPin, onDelete, onCopy, onEdit }) {
           </button>
         )}
         {item.url && (
-          <a href={item.url} className="card-url" target="_blank" rel="noopener noreferrer">
-            <IconLink /><span className="card-url-text">{item.url}</span>
+          <a href={/^https?:\/\//i.test(item.url) ? item.url : undefined} className="card-url" target="_blank" rel="noopener noreferrer">
+            <IconLink /><span className="card-url-text">{domain || 'Abrir link'}</span>
           </a>
         )}
         {item.tags.length > 0 && (
-          <div className="card-tags">{item.tags.map(t => <span key={t} className="tag">{t}</span>)}</div>
+          <div className="card-tags">{item.tags.slice(0, 2).map(t => <span key={t} className="tag">{t}</span>)}{item.tags.length > 2 && <span className="tag">+{item.tags.length - 2}</span>}</div>
         )}
       </div>
       <div className="card-footer">
         <span className="card-meta"><span className="card-type-dot" style={{ background: meta.color }} />{meta.label} · {formatRelative(item.updatedAt ?? item.createdAt)}</span>
         <div className="card-actions">
-          <button className="card-btn" onClick={() => onEdit(item)} aria-label="Editar" title="Editar" type="button"><IconEdit /></button>
-          <button className={`card-btn${isCopied ? ' success' : ''}`} onClick={() => onCopy(item)} aria-label={isCopied ? 'Copiado' : 'Copiar'} title="Copiar" type="button">
-            {isCopied ? <IconCheck /> : <IconCopy />}
-          </button>
           <button className={`card-btn${item.pinned ? ' active' : ''}`} onClick={() => onPin(item.id)} aria-label={item.pinned ? 'Desafixar' : 'Fixar'} title={item.pinned ? 'Desafixar' : 'Fixar'} type="button"><IconPin /></button>
-          <button className="card-btn danger" onClick={() => onDelete(item.id)} aria-label="Excluir" title="Excluir" type="button"><IconTrash /></button>
+          <ActionMenu>
+            <button onClick={() => onEdit(item)}><IconEdit />Editar</button>
+            <button onClick={() => onCopy(item)}>{isCopied ? <IconCheck /> : <IconCopy />}{isCopied ? 'Copiado' : 'Copiar'}</button>
+            <button className="danger" onClick={() => onDelete(item.id)}><IconTrash />Excluir</button>
+          </ActionMenu>
         </div>
       </div>
     </div>

@@ -44,10 +44,10 @@ vi.mock('../hooks/useMemories.js', () => ({
         id: 'idea-1',
         type: 'idea',
         content: longIdea,
-        url: '',
+        url: 'https://example.com/ideas?tracking=hidden',
         imageData: 'data:image/png;base64,abc123',
         tags: ['produto'],
-        pinned: false,
+        pinned: true,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       },
@@ -80,6 +80,35 @@ describe('App long content affordances', () => {
   beforeEach(() => {
     addItem.mockClear()
     updateItem.mockClear()
+    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', '') }
+    HTMLDialogElement.prototype.close = function () { this.removeAttribute('open') }
+  })
+
+  it('expands capture on focus and keeps data tools outside the editor', async () => {
+    render(<App />)
+    const content = await screen.findByLabelText('Conteúdo')
+    expect(screen.getByLabelText('Tags')).not.toBeVisible()
+    fireEvent.focus(content)
+    expect(screen.getByLabelText('Tags')).toBeVisible()
+    expect(screen.getByText('Exportar JSON').closest('details')).toHaveClass('action-menu')
+  })
+
+  it('collapses pinned memories and shows only a link domain on the card', async () => {
+    render(<App />)
+    const toggle = await screen.findByRole('button', { name: /Fixados/ })
+    expect(screen.getByText('example.com')).toBeVisible()
+    expect(screen.queryByText(/tracking=hidden/)).toBeNull()
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText('example.com')).not.toBeVisible()
+  })
+
+  it('opens full reading and returns to the collection', async () => {
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Ler memória: Memoria sem imagem' }))
+    expect(screen.getByRole('dialog', { name: 'Ler memória' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar' }))
+    expect(screen.queryByRole('dialog', { name: 'Ler memória' })).toBeNull()
   })
 
   it('collapses long cards and lets the user expand them', async () => {

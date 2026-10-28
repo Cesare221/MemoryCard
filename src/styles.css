@@ -13,8 +13,8 @@
   --border: rgba(255, 255, 255, 0.07);
   --border-hover: rgba(255, 255, 255, 0.13);
   --text: rgba(255, 242, 230, 0.92);
-  --text-secondary: rgba(255, 242, 230, 0.58);
-  --text-muted: rgba(255, 242, 230, 0.35);
+  --text-secondary: #c9bdb2;
+  --text-muted: #ac9f93;
   --accent: #d4a373;
   --accent-hover: #e0b88a;
   --accent-dim: rgba(212, 163, 115, 0.10);
@@ -44,8 +44,8 @@
   --border: rgba(0, 0, 0, 0.08);
   --border-hover: rgba(0, 0, 0, 0.14);
   --text: rgba(26, 22, 20, 0.92);
-  --text-secondary: rgba(26, 22, 20, 0.58);
-  --text-muted: rgba(26, 22, 20, 0.35);
+  --text-secondary: #61564c;
+  --text-muted: #716357;
   --accent: #b8834f;
   --accent-hover: #a07040;
   --accent-dim: rgba(184, 131, 79, 0.08);
